@@ -1,9 +1,8 @@
-﻿using System.Collections;
+﻿using Cinemachine;
+using DG.Tweening;
 using System.Collections.Generic;
 using UnityEngine;
-using DG.Tweening;
 using UnityEngine.Rendering.PostProcessing;
-using Cinemachine;
 
 public class KartController : MonoBehaviour
 {
@@ -67,34 +66,59 @@ public class KartController : MonoBehaviour
         }
     }
 
+    // ZAS: Nullable so that if no command is sent it is clear that no value is set
+    private bool? shouldAccelerate = null;
+    private float? horizontalMovement = null;
+    private bool? shouldJump = null;
+
+    // ZAS: These variables help us identify the one frame when jumping changes... similar to how GetButtonUp behaves
+    private bool wasJumpingLastFrame = false;
+
+    // ZAS: Informs the kart to accelerate during the next update call
+    public void Accelerate()
+    {
+        shouldAccelerate = true;
+    }
+
+    // ZAS: Informs the kart to jump during the next update call
+    public void Jump()
+    {
+        shouldJump = true;
+    }
+
+    // ZAS: Informs the kart to steer during the next update call. Range is -1f to 1f
+    public void Steer(float amount)
+    {
+        horizontalMovement = amount;
+    }
+
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Space))
-        {
-            float time = Time.timeScale == 1 ? .2f : 1;
-            Time.timeScale = time;
-        }
-
         //Follow Collider
         transform.position = sphere.transform.position - new Vector3(0, 0.4f, 0);
 
         //Accelerate
-        if (Input.GetButton("Fire1"))
+        bool isAccelerating = shouldAccelerate ?? false;
+        if (isAccelerating)
             speed = acceleration;
 
         //Steer
-        if (Input.GetAxis("Horizontal") != 0)
+        float horizontalMovementThisFrame = horizontalMovement ?? 0f;
+        if (horizontalMovementThisFrame != 0)
         {
-            int dir = Input.GetAxis("Horizontal") > 0 ? 1 : -1;
-            float amount = Mathf.Abs((Input.GetAxis("Horizontal")));
+            int dir = horizontalMovementThisFrame > 0 ? 1 : -1;
+            float amount = Mathf.Abs((horizontalMovementThisFrame));
             Steer(dir, amount);
         }
 
         //Drift
-        if (Input.GetButtonDown("Jump") && !drifting && Input.GetAxis("Horizontal") != 0)
+        bool isJumping = shouldJump ?? false;
+        bool jumpStateChangedThisFrame = isJumping != wasJumpingLastFrame;
+        bool startedJumpingThisFrame = jumpStateChangedThisFrame && isJumping == true;
+        if (startedJumpingThisFrame && !drifting && horizontalMovementThisFrame != 0)
         {
             drifting = true;
-            driftDirection = Input.GetAxis("Horizontal") > 0 ? 1 : -1;
+            driftDirection = horizontalMovementThisFrame > 0 ? 1 : -1;
 
             foreach (ParticleSystem p in primaryParticles)
             {
@@ -109,15 +133,16 @@ public class KartController : MonoBehaviour
 
         if (drifting)
         {
-            float control = (driftDirection == 1) ? ExtensionMethods.Remap(Input.GetAxis("Horizontal"), -1, 1, 0, 2) : ExtensionMethods.Remap(Input.GetAxis("Horizontal"), -1, 1, 2, 0);
-            float powerControl = (driftDirection == 1) ? ExtensionMethods.Remap(Input.GetAxis("Horizontal"), -1, 1, .2f, 1) : ExtensionMethods.Remap(Input.GetAxis("Horizontal"), -1, 1, 1, .2f);
+            float control = (driftDirection == 1) ? ExtensionMethods.Remap(horizontalMovementThisFrame, -1, 1, 0, 2) : ExtensionMethods.Remap(horizontalMovementThisFrame, -1, 1, 2, 0);
+            float powerControl = (driftDirection == 1) ? ExtensionMethods.Remap(horizontalMovementThisFrame, -1, 1, .2f, 1) : ExtensionMethods.Remap(horizontalMovementThisFrame, -1, 1, 1, .2f);
             Steer(driftDirection, control);
             driftPower += powerControl;
 
             ColorDrift();
         }
 
-        if (Input.GetButtonUp("Jump") && drifting)
+        bool stoppedJumpingThisFrame = jumpStateChangedThisFrame && isJumping == false;
+        if (stoppedJumpingThisFrame && drifting)
         {
             Boost();
         }
@@ -130,22 +155,29 @@ public class KartController : MonoBehaviour
         //a) Kart
         if (!drifting)
         {
-            kartModel.localEulerAngles = Vector3.Lerp(kartModel.localEulerAngles, new Vector3(0, 90 + (Input.GetAxis("Horizontal") * 15), kartModel.localEulerAngles.z), .2f);
+            kartModel.localEulerAngles = Vector3.Lerp(kartModel.localEulerAngles, new Vector3(0, 90 + (horizontalMovementThisFrame * 15), kartModel.localEulerAngles.z), .2f);
         }
         else
         {
-            float control = (driftDirection == 1) ? ExtensionMethods.Remap(Input.GetAxis("Horizontal"), -1, 1, .5f, 2) : ExtensionMethods.Remap(Input.GetAxis("Horizontal"), -1, 1, 2, .5f);
-            kartModel.parent.localRotation = Quaternion.Euler(0, Mathf.LerpAngle(kartModel.parent.localEulerAngles.y,(control * 15) * driftDirection, .2f), 0);
+            float control = (driftDirection == 1) ? ExtensionMethods.Remap(horizontalMovementThisFrame, -1, 1, .5f, 2) : ExtensionMethods.Remap(horizontalMovementThisFrame, -1, 1, 2, .5f);
+            kartModel.parent.localRotation = Quaternion.Euler(0, Mathf.LerpAngle(kartModel.parent.localEulerAngles.y, (control * 15) * driftDirection, .2f), 0);
         }
 
         //b) Wheels
-        frontWheels.localEulerAngles = new Vector3(0, (Input.GetAxis("Horizontal") * 15), frontWheels.localEulerAngles.z);
+        frontWheels.localEulerAngles = new Vector3(0, (horizontalMovementThisFrame * 15), frontWheels.localEulerAngles.z);
         frontWheels.localEulerAngles += new Vector3(0, 0, sphere.velocity.magnitude/2);
         backWheels.localEulerAngles += new Vector3(0, 0, sphere.velocity.magnitude/2);
 
         //c) Steering Wheel
-        steeringWheel.localEulerAngles = new Vector3(-25, 90, ((Input.GetAxis("Horizontal") * 45)));
+        steeringWheel.localEulerAngles = new Vector3(-25, 90, ((horizontalMovementThisFrame * 45)));
 
+        // ZAS: Clear command states after use
+        shouldAccelerate = null;
+        horizontalMovement = null;
+        shouldJump = null;
+
+        // ZAS: Store the jump state each frame for reference in the next frame to detect changes in state
+        wasJumpingLastFrame = isJumping;
     }
 
     private void FixedUpdate()
